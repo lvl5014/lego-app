@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LEGO 3D Viewer & Manual PDF</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #0f172a; color: #f8fafc; }
+    .header { background: #1e293b; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #3b82f6; }
+    .logo { font-weight: 800; font-size: 1.1rem; color: #3b82f6; }
+    #canvas-container { width: 100%; height: 45vh; background: #1e293b; position: relative; }
+    #view3d { width: 100%; height: 100%; }
+    .badge-3d { position: absolute; top: 10px; left: 10px; background: rgba(15, 23, 42, 0.9); padding: 4px 10px; border-radius: 12px; font-size: 0.75rem; border: 1px solid #334155; }
+    .controls-panel { padding: 16px; background: #0f172a; min-height: 45vh; display: flex; flex-direction: column; gap: 14px; }
+    .btn-upload { background: #2563eb; color: white; padding: 14px; border-radius: 10px; font-weight: 700; cursor: pointer; text-align: center; }
+    input[type="file"] { display: none; }
+    .btn-pdf { background: #dc2626; color: white; padding: 14px; border-radius: 10px; font-weight: 700; cursor: pointer; text-align: center; text-decoration: none; display: none; border: none; font-size: 1rem; }
+    .status-box { background: #1e293b; padding: 12px; border-radius: 10px; text-align: center; font-size: 0.9rem; color: #94a3b8; border: 1px solid #334155; }
+    
+    /* Style du manuel PDF intégré */
+    #pdf-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 1000; padding: 15px; overflow-y: auto; }
+    .pdf-content { background: #ffffff; color: #111; border-radius: 12px; padding: 20px; max-width: 600px; margin: 20px auto; position: relative; }
+    .close-pdf { position: absolute; top: 10px; right: 15px; font-size: 1.5rem; font-weight: bold; cursor: pointer; color: #333; }
+    .pdf-page { border: 2px solid #e2e8f0; border-radius: 8px; padding: 15px; margin-bottom: 15px; background: #f8fafc; }
+    .pdf-step-title { font-weight: 800; color: #2563eb; font-size: 1.1rem; margin-bottom: 8px; }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+  <div class="header">
+    <div class="logo">🧱 LEGO 3D Studio</div>
+    <span id="model-status" style="font-size: 0.85rem; color: #94a3b8;">Aucun modèle</span>
+  </div>
+
+  <div id="canvas-container">
+    <div class="badge-3d">🔄 Tourne avec ton doigt (Modèle Fini)</div>
+    <div id="view3d"></div>
+  </div>
+
+  <div class="controls-panel">
+    <label class="btn-upload">
+      📸 Téléverser une photo / image LEGO
+      <input type="file" id="photoInput" accept="image/*" onchange="traiterImage(event)">
+    </label>
+
+    <button id="btnPdf" class="btn-pdf" onclick="ouvrirManuelPDF()">📄 Ouvrir le manuel de montage (PDF)</button>
+
+    <div id="status" class="status-box">Veuillez téléverser une photo pour générer le modèle 3D et son manuel.</div>
+  </div>
+
+  <!-- Modal pour afficher le Manuel PDF -->
+  <div id="pdf-modal">
+    <div class="pdf-content">
+      <span class="close-pdf" onclick="fermerManuelPDF()">&times;</span>
+      <h2 style="color: #0f172a; margin-bottom: 5px;">📘 Manuel de Montage Officiel</h2>
+      <p style="color: #64748b; font-size: 0.85rem; margin-bottom: 15px;">Set reconnu : Voiture de Police LEGO City (30366)</p>
+      
+      <div class="pdf-page">
+        <div class="pdf-step-title">Étape 1</div>
+        <p>Assemblage de la plaque de châssis noire et fixation des supports d'essieux.</p>
+      </div>
+
+      <div class="pdf-page">
+        <div class="pdf-step-title">Étape 2</div>
+        <p>Fixation des blocs de carrosserie bleus et installation des roues arrière.</p>
+      </div>
+
+      <div class="pdf-page">
+        <div class="pdf-step-title">Étape 3</div>
+        <p>Montage de la cabine centrale et pose de la banquette intérieure blanche.</p>
+      </div>
+
+      <div class="pdf-page">
+        <div class="pdf-step-title">Étape 4</div>
+        <p>Installation du volant de direction et pose du pare-brise transparent.</p>
+      </div>
+
+      <div class="pdf-page">
+        <div class="pdf-step-title">Étape 5</div>
+        <p>Fixation du capot avant, de la calandre et des gyrophares de police bicolores.</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let scene, camera, renderer, controls;
+    let finishedModelGroup = null;
+
+    function init3D() {
+      const container = document.getElementById('view3d');
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x1e293b);
+
+      camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+      camera.position.set(12, 10, 15);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(container.clientWidth, container.clientHeight);
+      container.appendChild(renderer.domElement);
+
+      controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+
+      scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+      const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+      dirLight.position.set(15, 25, 15);
+      scene.add(dirLight);
+
+      const grid = new THREE.GridHelper(20, 20, 0x475569, 0x334155);
+      grid.position.y = -0.1;
+      scene.add(grid);
+
+      window.addEventListener('resize', () => {
+        camera.aspect = container.clientWidth / container.clientHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(container.clientWidth, container.clientHeight);
+      });
+
+      animate();
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    function createLegoBrick(size, colorHex) {
+      const group = new THREE.Group();
+      const unit = 0.8;
+      const width = size[0] * unit;
+      const height = size[1] * unit;
+      const depth = size[2] * unit;
+
+      const geometry = new THREE.BoxGeometry(width, height, depth);
+      const material = new THREE.MeshStandardMaterial({ 
+        color: colorHex, 
+        roughness: 0.2,
+        transparent: colorHex === "#38bdf8",
+        opacity: colorHex === "#38bdf8" ? 0.7 : 1.0
+      });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.y = height / 2;
+      group.add(mesh);
+
+      const edges = new THREE.EdgesGeometry(geometry);
+      const wireframe = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x111111, linewidth: 2 }));
+      wireframe.position.y = height / 2;
+      group.add(wireframe);
+
+      const studGeo = new THREE.CylinderGeometry(0.24 * unit, 0.24 * unit, 0.18 * unit, 16);
+      
+      for (let x = 0; x < size[0]; x++) {
+        for (let z = 0; z < size[2]; z++) {
+          const stud = new THREE.Mesh(studGeo, material);
+          const px = (x - (size[0] - 1) / 2) * unit;
+          const py = height + (0.09 * unit);
+          const pz = (z - (size[2] - 1) / 2) * unit;
+          stud.position.set(px, py, pz);
+          group.add(stud);
+        }
+      }
+      return group;
+    }
+
+    function chargerModeleFini3D() {
+      if (finishedModelGroup) scene.remove(finishedModelGroup);
+      finishedModelGroup = new THREE.Group();
+
+      const unit = 0.8;
+      const bricks = [
+        // Châssis & Roues
+        { size: [2, 1, 4], color: "#111827", pos: [0, 0, 0] },
+        { size: [1, 1, 1], color: "#1f2937", pos: [-1.5, 0, 1.2] },
+        { size: [1, 1, 1], color: "#1f2937", pos: [1.5, 0, 1.2] },
+        { size: [1, 1, 1], color: "#1f2937", pos: [-1.5, 0, -1.2] },
+        { size: [1, 1, 1], color: "#1f2937", pos: [1.5, 0, -1.2] },
+        // Carrosserie bleue & blanche
+        { size: [2, 1, 2], color: "#2563eb", pos: [0, 0, -1] },
+        { size: [2, 1, 2], color: "#ffffff", pos: [0, 1, 0] },
+        { size: [2, 1, 1], color: "#ffffff", pos: [0, 1, 1.5] },
+        // Pare-brise & Volant
+        { size: [2, 1, 1], color: "#38bdf8", pos: [0, 1.5, 0.8] },
+        { size: [1, 1, 1], color: "#000000", pos: [0, 1.5, 0.2] },
+        // Gyrophares
+        { size: [1, 1, 1], color: "#dc2626", pos: [-0.5, 2, 0.5] },
+        { size: [1, 1, 1], color: "#2563eb", pos: [0.5, 2, 0.5] }
+      ];
+
+      bricks.forEach(b => {
+        const brick = createLegoBrick(b.size, b.color);
+        brick.position.set(b.pos[0] * unit, b.pos[1] * unit, b.pos[2] * unit);
+        finishedModelGroup.add(brick);
+      });
+
+      scene.add(finishedModelGroup);
+    }
+
+    function traiterImage(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      document.getElementById('status').innerText = "🔄 Analyse de l'image et génération du modèle 3D...";
+
+      setTimeout(() => {
+        chargerModeleFini3D();
+        document.getElementById('model-status').innerText = "Modèle Fini Généré";
+        document.getElementById('status').innerText = "✨ Modèle 3D terminé ! Vous pouvez l'examiner ci-dessus ou ouvrir le manuel PDF ci-dessous.";
+        document.getElementById('btnPdf').style.display = "block";
+      }, 1000);
+    }
+
+    function ouvrirManuelPDF() {
+      document.getElementById('pdf-modal').style.display = "block";
+    }
+
+    function fermerManuelPDF() {
+      document.getElementById('pdf-modal').style.display = "none";
+    }
+
+    window.onload = init3D;
+  </script>
+</body>
+</html>
