@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Analyseur LEGO Studio</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+    
+    /* Barre supérieure */
+    .header { background: #1e293b; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #f97316; }
+    .logo { font-weight: 800; font-size: 1.2rem; color: #f97316; display: flex; align-items: center; gap: 8px; }
+    
+    .set-container { display: flex; align-items: center; gap: 8px; }
+    #set-badge { background: #0284c7; color: #fff; padding: 6px 14px; border-radius: 8px; font-weight: 700; font-size: 0.9rem; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+    .btn-edit { background: #334155; color: #fff; border: 1px solid #475569; padding: 6px 10px; border-radius: 8px; font-size: 0.8rem; cursor: pointer; font-weight: 600; }
+    .btn-edit:hover { background: #475569; }
+
+    /* Zone de visualisation principale 360° */
+    .viewer-area { flex-grow: 1; background: radial-gradient(circle at center, #ffffff 0%, #e2e8f0 100%); position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: grab; touch-action: none; }
+    .viewer-area:active { cursor: grabbing; }
+    #model-img { max-width: 85%; max-height: 85%; object-fit: contain; transition: transform 0.1s ease-out; user-select: none; filter: drop-shadow(0 20px 25px rgba(0,0,0,0.25)); }
+
+    /* Outils flottants sur l'image */
+    .toolbar { position: absolute; bottom: 16px; display: flex; gap: 10px; background: rgba(15, 23, 42, 0.85); padding: 8px 14px; border-radius: 30px; backdrop-filter: blur(4px); }
+    .tool-btn { background: transparent; border: none; color: #fff; font-size: 0.85rem; font-weight: 600; cursor: pointer; padding: 4px 10px; border-radius: 15px; transition: background 0.2s; }
+    .tool-btn:hover { background: rgba(255,255,255,0.15); }
+
+    /* Panneau de contrôle bas */
+    .bottom-panel { padding: 16px 20px; background: #1e293b; display: flex; flex-direction: column; gap: 10px; border-top: 1px solid #334155; }
+    .panel-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .btn { padding: 12px; border-radius: 10px; font-weight: 700; font-size: 0.95rem; cursor: pointer; text-align: center; border: none; display: flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; transition: opacity 0.2s; }
+    .btn:active { opacity: 0.8; }
+    .btn-primary { background: #0284c7; color: white; }
+    .btn-secondary { background: #f97316; color: white; }
+    input[type="file"] { display: none; }
+    
+    .status-text { text-align: center; font-size: 0.85rem; color: #38bdf8; font-weight: 600; }
+  </style>
+</head>
+<body>
+
+  <header class="header">
+    <div class="logo">🔍 Analyseur LEGO Studio</div>
+    <div class="set-container">
+      <div id="set-badge">Set : 60442</div>
+      <button class="btn-edit" onclick="modifierNumeroSet()" title="Corriger manuellement">✏️ Changer</button>
+    </div>
+  </header>
+
+  <main class="viewer-area" id="viewer">
+    <img src="https://images.unsplash.com/photo-1568605117036-5fe5e7bab0b7?auto=format&fit=crop&w=1200&q=80" alt="Modèle LEGO" id="model-img">
+    
+    <div class="toolbar">
+      <button class="tool-btn" onclick="miroirImage()">⇄ Retourner</button>
+      <button class="tool-btn" onclick="resetVue()">↺ Réinitialiser</button>
+    </div>
+  </main>
+
+  <footer class="bottom-panel">
+    <div id="status-msg" class="status-text">✨ Prenez une photo : l'analyseur cherche le set, et vous pouvez le corriger avec ✏️ si besoin !</div>
+    <div class="panel-row">
+      <label class="btn btn-secondary">
+        📸 Importer / Prendre une photo
+        <input type="file" accept="image/*" onchange="analyserImageLego(event)">
+      </label>
+      <a id="notice-link" href="https://www.lego.com/fr-fr/service/buildinginstructions/60442" target="_blank" class="btn primary btn-primary">📖 Ouvrir la Notice Officielle</a>
+    </div>
+  </footer>
+
+  <script>
+    const imgEl = document.getElementById('model-img');
+    const viewer = document.getElementById('viewer');
+    const setBadge = document.getElementById('set-badge');
+    const statusMsg = document.getElementById('status-msg');
+    const noticeLink = document.getElementById('notice-link');
+
+    let scale = 1;
+    let rotation = 0;
+    let flipX = 1;
+    let isDragging = false;
+    let startX = 0;
+    let currentSetNum = "60442";
+
+    function updateTransform() {
+      imgEl.style.transform = `scale(${scale}) scaleX(${flipX}) rotate(${rotation}deg)`;
+    }
+
+    function miroirImage() {
+      flipX *= -1;
+      updateTransform();
+    }
+
+    function resetVue() {
+      scale = 1;
+      rotation = 0;
+      flipX = 1;
+      updateTransform();
+    }
+
+    viewer.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      scale += e.deltaY * -0.001;
+      scale = Math.min(Math.max(0.5, scale), 3);
+      updateTransform();
+    });
+
+    viewer.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('.toolbar')) return;
+      isDragging = true;
+      startX = e.clientX;
+    });
+
+    window.addEventListener('pointermove', (e) => {
+      if (!isDragging) return;
+      rotation += (e.clientX - startX) * 0.4;
+      startX = e.clientX;
+      updateTransform();
+    });
+
+    window.addEventListener('pointerup', () => { isDragging = false; });
+
+    async function analyserImageLego(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        imgEl.src = e.target.result;
+        resetVue();
+      };
+      reader.readAsDataURL(file);
+
+      statusMsg.innerText = "🔍 Analyse de la photo en cours...";
+      setBadge.innerText = "Recherche...";
+
+      const formData = new FormData();
+      formData.append("query_image", file);
+
+      try {
+        const response = await fetch("https://api.brickognize.com/predict/sets/", {
+          method: "POST",
+          body: formData
+        });
+
+        if (!response.ok) throw new Error("Erreur");
+        const data = await response.json();
+
+        if (data.items && data.items.length > 0) {
+          // On cherche un set dont le numéro fait 4 ou 5 chiffres (en évitant les gros numéros de packs comme 66xxx)
+          let bonMatch = data.items.find(item => {
+            let num = item.id.split('-')[0];
+            return num.length === 4 || (num.length === 5 && !num.startsWith("66"));
+          });
+
+          if (!bonMatch) bonMatch = data.items[0]; // Sécurité
+
+          currentSetNum = bonMatch.id.split('-')[0];
+          const nomSet = bonMatch.name;
+
+          mettreAJourSet(currentSetNum);
+          statusMsg.innerText = `✅ Trouvé : ${nomSet} (Set #${currentSetNum})`;
+        } else {
+          throw new Error("Non trouvé");
+        }
+      } catch (error) {
+        statusMsg.innerText = "⚠️ Set non identifié automatiquement. Cliquez sur ✏️ Changer.";
+      }
+    }
+
+    function modifierNumeroSet() {
+      const saisi = prompt("Entrez le numéro exact du set LEGO (ex: 60287) :", currentSetNum);
+      if (saisi && saisi.trim() !== "") {
+        currentSetNum = saisi.trim();
+        mettreAJourSet(currentSetNum);
+        statusMsg.innerText = `✅ Set configuré : ${currentSetNum}`;
+      }
+    }
+
+    function mettreAJourSet(num) {
+      setBadge.innerText = `Set : ${num}`;
+      noticeLink.href = `https://www.lego.com/fr-fr/service/buildinginstructions/${num}`;
+    }
+  </script>
+</body>
+</html>
